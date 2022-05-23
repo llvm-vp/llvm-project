@@ -233,6 +233,45 @@ static cl::opt<PreferPredicateTy::Option> PreferPredicateOverEpilogue(
                          "prefers tail-folding, don't attempt vectorization if "
                          "tail-folding fails.")));
 
+// Option use-vp-intrinsics is an experimental switch to
+// indicate that the loop vectorizer should try to generate VP intrinsics if
+// tail-folding is enabled (note that this option is dependent on the
+// prefer-predicate-over-epilogue option being set to predicate-dont-vectorize).
+// This can be particularly useful for targets like RISC-V and SX-Aurora that
+// support vector length predication.
+// Currently this switch takes two possible values:
+// 0. off: Never use VP intrinsics, even if requested by the target. This is
+// purely an experimental/testing option which will be removed in future.
+// 1. forced-no-evl: Always use VP intrinsics but without the explicit vector
+// length parameter. Use the mask parameter for tail predication. This is
+// purely an experimental/testing option which will be removed in future.
+// 2. forced-with-evl: Always use VP intrinsics and use the explicit vector
+// length parameter for tail predication. This is purely an
+// experimental/testing option which will be removed in future.
+namespace VPIntrinsicPolicyTy {
+enum Option {
+  Off = 0,
+  ForcedNoEVL = 1,
+  ForcedWithEVL = 2,
+};
+} // namespace VPIntrinsicPolicyTy
+
+static cl::opt<VPIntrinsicPolicyTy::Option> VPIntrinsicPolicy(
+    "use-vp-intrinsics",
+    cl::init(VPIntrinsicPolicyTy::Off), cl::Hidden,
+    cl::desc("When vectorizing with tail-folding, generate vector predication "
+             "intrinsics."),
+    cl::values(
+        clEnumValN(VPIntrinsicPolicyTy::Off,
+                   "off",
+                   "Never emit VP intrinsics, disregarding the target's default behavior."),
+        clEnumValN(VPIntrinsicPolicyTy::ForcedNoEVL,
+                   "forced-no-evl",
+                   "Always emit VP intrinsic. Use the mask parameter for tail predication and disable the explicit vector-length parameter."),
+        clEnumValN(VPIntrinsicPolicyTy::ForcedWithEVL,
+                   "forced",
+                   "Always emit VP intrinsics. Use the explicit vector-length parameter for tail predication. Use the mask parameter for control-flow masking.")));
+
 static cl::opt<bool> MaximizeBandwidth(
     "vectorizer-maximize-bandwidth", cl::init(false), cl::Hidden,
     cl::desc("Maximize bandwidth when selecting vectorization factor which "
@@ -1604,6 +1643,18 @@ public:
     return foldTailByMasking() || Legal->blockNeedsPredication(BB);
   }
 
+  /// Returns true if VP intrinsics should be generated in the tail folded loop.
+  bool preferVPIntrinsics() const {
+    return foldTailByMasking() && EmitVPIntrinsics;
+  }
+
+  /// Returns true if the explicit vector-length parameter of VP intrinsics
+  /// should be used in the tail-folded loop.
+  bool foldTailByExplicitVectorLength() const {
+    return preferVPIntrinsics() &&
+           VPIntrinsicPolicy == VPIntrinsicPolicyTy::ForcedWithEVL;
+  }
+
   /// A SmallMapVector to store the InLoop reduction op chains, mapping phi
   /// nodes to the chain of instructions representing the reductions. Uses a
   /// MapVector to ensure deterministic iteration order.
@@ -1773,6 +1824,9 @@ private:
 
   /// All blocks of loop are to be masked to fold tail of scalar iterations.
   bool FoldTailByMasking = false;
+
+  /// Control whether to generate VP intrinsics in vectorized code.
+  bool EmitVPIntrinsics = false;
 
   /// A map holding scalar costs for different vectorization factors. The
   /// presence of a cost for an instruction in the mapping indicates that the
@@ -5135,6 +5189,20 @@ LoopVectorizationCostModel::computeMaxVF(ElementCount UserVF, unsigned UserIC) {
   // FIXME: look for a smaller MaxVF that does divide TC rather than masking.
   if (Legal->prepareToFoldTailByMasking()) {
     FoldTailByMasking = true;
+    if (VPIntrinsicPolicy == VPIntrinsicPolicyTy::Off)
+      return MaxFactors;
+
+    if (UserIC > 1) {
+      LLVM_DEBUG(dbgs() << "LV: Preference for VP intrinsics indicated. Will "
+                           "not generate VP intrinsics since interleave count "
+                           "specified is greater than 1.\n");
+      return MaxFactors;
+    }
+
+    EmitVPIntrinsics = true;
+    LLVM_DEBUG(dbgs() << "LV: Preference for VP intrinsics indicated. Will "
+                         "try to generate VP Intrinsics.\n");
+
     return MaxFactors;
   }
 
@@ -5681,6 +5749,11 @@ unsigned LoopVectorizationCostModel::selectInterleaveCount(ElementCount VF,
   // due to the increased register pressure.
 
   if (!isScalarEpilogueAllowed())
+    return 1;
+
+  // Do not interleave if VP intrinsics are preferred and no User IC is
+  // specified.
+  if (preferVPIntrinsics())
     return 1;
 
   // We used the distance for the interleave count.
