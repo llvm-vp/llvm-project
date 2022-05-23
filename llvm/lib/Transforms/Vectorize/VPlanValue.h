@@ -51,6 +51,7 @@ class VPValue {
   friend class VPSlotTracker;
   friend class VPRecipeBase;
   friend class VPWidenMemoryInstructionRecipe;
+  friend class VPPredicatedWidenMemoryInstructionRecipe;
 
   const unsigned char SubclassID; ///< Subclass identifier (for isa/dyn_cast).
 
@@ -99,6 +100,11 @@ public:
     VPVWidenCanonicalIVSC,
     VPVWidenGEPSC,
     VPVWidenSelectSC,
+
+    // Vector Predication values.
+    VPVPredicatedMemoryInstructionSC,
+    VPVPredicatedWidenSC,
+    VPVWidenEVLSC,
 
     // Phi-like VPValues. Need to be kept together.
     VPVBlendSC,
@@ -357,6 +363,11 @@ public:
     VPWidenMemoryInstructionSC,
     VPWidenSC,
     VPWidenSelectSC,
+
+    // Vector Predication resipcs.
+    VPPredicatedWidenMemoryInstructionSC,
+    VPPredicatedWidenSC,
+    VPWidenEVLSC,
 
     // Phi-like recipes. Need to be kept together.
     VPBlendSC,
