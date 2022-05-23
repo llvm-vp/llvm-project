@@ -922,6 +922,15 @@ void VPlan::prepareToExecute(Value *TripCountV, Value *VectorTripCountV,
       State.set(TripCount, TripCountV, Part);
   }
 
+  // Check if the runtime VF is needed, and if so build it.
+  if (RuntimeVF && RuntimeVF->getNumUsers()) {
+    IRBuilder<> Builder(State.CFG.PrevBB->getTerminator());
+    Value *RuntimeVFVal =
+        getRuntimeVF(Builder, Builder.getInt32Ty(), State.VF);
+    for (unsigned Part = 0, UF = State.UF; Part < UF; ++Part)
+      State.set(RuntimeVF, RuntimeVFVal, Part);
+  }
+
   // Check if the backedge taken count is needed, and if so build it.
   if (BackedgeTakenCount && BackedgeTakenCount->getNumUsers()) {
     IRBuilder<> Builder(State.CFG.PrevBB->getTerminator());
@@ -1173,6 +1182,16 @@ void VPlanPrinter::dump() {
     OS << ", where:\\n";
     Plan.BackedgeTakenCount->print(OS, SlotTracker);
     OS << " := BackedgeTakenCount";
+  }
+  if (Plan.TripCount) {
+    OS << "\\n";
+    Plan.RuntimeVF->print(OS, SlotTracker);
+    OS << " := TripCount";
+  }
+  if (Plan.RuntimeVF) {
+    OS << "\\n";
+    Plan.RuntimeVF->print(OS, SlotTracker);
+    OS << " := RuntimeVF";
   }
   OS << "\"]\n";
   OS << "node [shape=rect, fontname=Courier, fontsize=30]\n";
@@ -1824,6 +1843,12 @@ void VPSlotTracker::assignSlots(const VPlan &Plan) {
   assignSlot(&Plan.VectorTripCount);
   if (Plan.BackedgeTakenCount)
     assignSlot(Plan.BackedgeTakenCount);
+
+  if (Plan.TripCount)
+    assignSlot(Plan.TripCount);
+
+  if (Plan.RuntimeVF)
+    assignSlot(Plan.RuntimeVF);
 
   ReversePostOrderTraversal<
       VPBlockRecursiveTraversalWrapper<const VPBlockBase *>>

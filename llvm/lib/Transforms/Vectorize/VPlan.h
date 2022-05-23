@@ -2664,6 +2664,13 @@ class VPlan {
   /// Represents the vector trip count.
   VPValue VectorTripCount;
 
+  /// Represents the runtime VF. Some recipes like Vector Predicated recipes may
+  /// use runtime VF as an operand. At the time of plan construction while it is
+  /// known that this value is a loop invariant, but the corresponding IR value
+  /// is only available at plan execution once the final VF and corresponding
+  /// plan are chosen.
+  VPValue *RuntimeVF = nullptr;
+
   /// Holds a mapping between Values and their corresponding VPValue inside
   /// VPlan.
   Value2VPValueTy Value2VPValue;
@@ -2704,6 +2711,8 @@ public:
       delete TripCount;
     if (BackedgeTakenCount)
       delete BackedgeTakenCount;
+    if (RuntimeVF)
+      delete RuntimeVF;
     for (auto &P : VPExternalDefs)
       delete P.second;
   }
@@ -2744,6 +2753,14 @@ public:
   /// Mark the plan to indicate that using Value2VPValue is not safe any
   /// longer, because it may be stale.
   void disableValue2VPValue() { Value2VPValueEnabled = false; }
+
+  /// A VPValue representing the loop invariant runtime VF to be expanded at
+  /// paln execution.
+  VPValue *getOrCreateRuntimeVF() {
+    if (!RuntimeVF)
+      RuntimeVF = new VPValue();
+    return RuntimeVF;
+  }
 
   void addVF(ElementCount VF) { VFs.insert(VF); }
 

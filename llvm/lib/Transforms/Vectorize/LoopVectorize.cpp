@@ -8073,6 +8073,16 @@ VPValue *VPRecipeBuilder::createEdgeMask(BasicBlock *Src, BasicBlock *Dst,
   return EdgeMaskCache[Edge] = EdgeMask;
 }
 
+VPValue *VPRecipeBuilder::getOrCreateIV(VPBasicBlock *VPBB, VPlanPtr &Plan) {
+  IVCacheTy::iterator IVEntryIt = IVCache.find(VPBB);
+  if (IVEntryIt != IVCache.end())
+    return IVEntryIt->second;
+
+  auto *IV = new VPWidenCanonicalIVRecipe(Plan->getCanonicalIV());
+  VPBB->insert(IV, VPBB->getFirstNonPhi());
+  return IVCache[VPBB] = IV;
+}
+
 VPValue *VPRecipeBuilder::createBlockInMask(BasicBlock *BB, VPlanPtr &Plan) {
   assert(OrigLoop->contains(BB) && "Block is not a part of a loop");
 
@@ -8096,9 +8106,8 @@ VPValue *VPRecipeBuilder::createBlockInMask(BasicBlock *BB, VPlanPtr &Plan) {
     assert(CM.foldTailByMasking() && "must fold the tail");
     VPBasicBlock *HeaderVPBB =
         Plan->getVectorLoopRegion()->getEntryBasicBlock();
+    auto *IV = getOrCreateIV(HeaderVPBB, Plan);
     auto NewInsertionPoint = HeaderVPBB->getFirstNonPhi();
-    auto *IV = new VPWidenCanonicalIVRecipe(Plan->getCanonicalIV());
-    HeaderVPBB->insert(IV, HeaderVPBB->getFirstNonPhi());
 
     VPBuilder::InsertPointGuard Guard(Builder);
     Builder.setInsertPoint(HeaderVPBB, NewInsertionPoint);
